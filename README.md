@@ -82,6 +82,29 @@ Dashboard URL: `http://localhost:8501`
 - 👥 **Cohort Explorer**: Interactive filtering and demographic visualization
 - ℹ️ **Database Info**: Database statistics and distributions
 
+## 🖥️ GUI Application (No Terminal Required!)
+
+For users who prefer a graphical interface:
+```bash
+# Launch GUI
+python gui_app.py
+```
+
+### GUI Features:
+- 📁 **File Browser** - Select your data file with a click
+- ▶️ **One-Click Analysis** - Run complete pipeline with progress bar
+- 📊 **Dashboard Launcher** - Open interactive dashboard
+- 📝 **Live Log** - See analysis progress in real-time
+- 📁 **Quick Access** - Open output files directly
+
+### GUI Usage:
+1. Click "Browse" to select your CSV file
+2. Click "Run Complete Analysis" and wait
+3. Click "View Interactive Dashboard" when done
+
+No terminal commands needed!
+
+
 ## 📁 Project Structure
 ```
 Teiko/
