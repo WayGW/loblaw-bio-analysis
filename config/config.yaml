@@ -1,0 +1,41 @@
+# Loblaw Bio - Project Configuration
+
+database:
+  path: "data/processed/loblaw_trial.db"
+  
+data:
+  raw_csv: "data/raw/cell-count.csv"
+  
+analysis:
+  # Part 3: Response analysis parameters
+  part3:
+    indication: "melanoma"
+    treatment: "miraclib"
+    sample_type: "PBMC"
+    alpha: 0.05
+    bonferroni_populations: 5  # Number of populations for correction
+    multiple_testing: "bonferroni"  # Options: bonferroni, fdr_bh
+  
+  # Part 4: Baseline filtering
+  part4:
+    baseline_timepoint: 0
+    
+visualization:
+  color_palette: "colorblind"  # Seaborn palette name
+  figure_dpi: 300
+  figsize:
+    width: 10
+    height: 6
+  
+dashboard:
+  title: "Loblaw Bio - Clinical Trial Analysis"
+  port: 8501
+  theme: "light"
+
+# Cell populations reference
+cell_populations:
+  - b_cell
+  - cd8_t_cell
+  - cd4_t_cell
+  - nk_cell
+  - monocyte
