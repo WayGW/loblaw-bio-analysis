@@ -17,10 +17,11 @@ This project analyzes immune cell populations (B cells, CD4/CD8 T cells, NK cell
 
 ### Three Ways to Use This Tool
 
-1. **🖥️ Standalone Application (Easiest - No Installation!)**
+1. **🖥️ Standalone Application (Easiest - No Installation!) (Found in releases v1.0.0)**
    - Download `LoblawBio.exe`
    - Double-click to run
    - No Python, Anaconda, or terminal needed!
+   - BUT No Streamlit, currently less analysis implemented, worse interface.
 
 2. **🎨 GUI Application (Python Required)**
    - Best for users comfortable with Python but prefer graphical interface
