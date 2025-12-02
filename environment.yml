@@ -14,6 +14,10 @@ dependencies:
   - scipy=1.11
   - statsmodels=0.14
   
+  #Machine Learning
+  - scikit-learn
+  - xgboost
+
   # Visualization
   - matplotlib=3.7
   - seaborn=0.12
@@ -35,3 +39,4 @@ dependencies:
   - pip:
       - streamlit==1.25.0
       - pingouin==0.5.4
+      - pyinstaller

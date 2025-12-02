@@ -139,80 +139,65 @@ class ResponseAnalyzer:
             'non_responders_normal': non_resp_normal
         }
     
-    def analyze_all_populations(
-        self,
-        indication: str = 'melanoma',
-        treatment: str = 'miraclib',
-        sample_type: str = 'PBMC',
-        alpha: float = 0.05
-    ) -> pd.DataFrame:
+    def analyze_all_populations(self, indication='melanoma', treatment='miraclib', 
+                               sample_type='PBMC', alpha=0.05):
         """
-        Perform statistical analysis for all cell populations.
+        Analyze all cell populations comparing responders vs non-responders.
         
-        Applies Bonferroni correction for multiple testing.
-        
-        Args:
-            indication: Disease indication
-            treatment: Treatment name
-            sample_type: Sample type
-            alpha: Significance level (default: 0.05)
-            
         Returns:
-            DataFrame with test results for each population
+            DataFrame with statistical test results for each population
         """
-        # Get data
-        df = self.get_response_data(indication, treatment, sample_type)
+        populations = ['b_cell', 'cd8_t_cell', 'cd4_t_cell', 'nk_cell', 'monocyte']
         
-        if len(df) == 0:
-            raise ValueError("No data found with specified filters")
-        
-        # Number of populations for Bonferroni correction
-        populations = df['population'].unique()
-        n_tests = len(populations)
-        bonferroni_alpha = alpha / n_tests
+        # Get data for all populations
+        data = self.get_response_data(indication, treatment, sample_type)
         
         results = []
         
-        for population in populations:
-            pop_data = df[df['population'] == population]
+        # Bonferroni correction
+        n_tests = len(populations)
+        alpha_corrected = alpha / n_tests
+        
+        for pop in populations:
+            pop_data = data[data['population'] == pop]
+            
+            if len(pop_data) == 0:
+                continue
             
             # Split by response
             responders = pop_data[pop_data['response'] == 'yes']['percentage'].values
             non_responders = pop_data[pop_data['response'] == 'no']['percentage'].values
             
-            # Perform comparison
-            test_results = self.compare_groups(responders, non_responders)
+            # Perform Mann-Whitney U test
+            statistic, p_value = stats.mannwhitneyu(responders, non_responders, alternative='two-sided')
             
-            # Compile results
+            # Calculate effect size (rank-biserial correlation)
+            n1, n2 = len(responders), len(non_responders)
+            effect_size = 1 - (2 * statistic) / (n1 * n2)
+            
+            # Bonferroni corrected p-value
+            p_value_corrected = min(p_value * n_tests, 1.0)  # Cap at 1.0
+            
+            # Determine significance with corrected alpha
+            significant = p_value < alpha_corrected
+            
             results.append({
-                'population': population,
-                'n_responders': len(responders),
-                'n_non_responders': len(non_responders),
-                'median_responders': np.median(responders),
-                'median_non_responders': np.median(non_responders),
-                'mean_responders': np.mean(responders),
-                'mean_non_responders': np.mean(non_responders),
-                'std_responders': np.std(responders),
-                'std_non_responders': np.std(non_responders),
-                'p_value': test_results['p_value'],
-                'p_value_corrected': test_results['p_value'],  # For Bonferroni
-                'significant': test_results['p_value'] < bonferroni_alpha,
-                'effect_size': test_results['effect_size'],
-                'test_used': test_results['test_used']
+                'population': pop,
+                'n_responders': int(n1),
+                'n_non_responders': int(n2),
+                'median_responders': float(np.median(responders)),
+                'median_non_responders': float(np.median(non_responders)),
+                'mean_responders': float(np.mean(responders)),
+                'mean_non_responders': float(np.mean(non_responders)),
+                'std_responders': float(np.std(responders)),
+                'std_non_responders': float(np.std(non_responders)),
+                'p_value': float(p_value),
+                'p_value_corrected': float(p_value_corrected),
+                'significant': bool(significant),
+                'effect_size': float(effect_size)
             })
         
-        results_df = pd.DataFrame(results)
-        
-        # Add significance markers
-        results_df['significance'] = results_df['significant'].map({
-            True: '***' if results_df['p_value'].min() < 0.001 else '**',
-            False: 'ns'
-        })
-        
-        # Sort by p-value
-        results_df = results_df.sort_values('p_value')
-        
-        return results_df
+        return pd.DataFrame(results)
     
     def print_results_summary(self, results_df: pd.DataFrame) -> None:
         """
@@ -229,7 +214,7 @@ class ResponseAnalyzer:
         print(f"  Responders: {results_df['n_responders'].iloc[0]}")
         print(f"  Non-responders: {results_df['n_non_responders'].iloc[0]}")
         
-        print(f"\nTest used: {results_df['test_used'].iloc[0].replace('_', ' ').title()}")
+        print(f"\nTest used: Mann-Whitney U Test")
         print(f"Multiple testing correction: Bonferroni")
         print(f"Significance threshold: p < {0.05/len(results_df):.4f}")
         

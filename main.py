@@ -7,6 +7,7 @@ Usage:
     python main.py --info
 """
 
+import pandas as pd
 import argparse
 import sqlite3
 import yaml
@@ -14,6 +15,7 @@ from pathlib import Path
 from src.analysis.summary_stats import FrequencyAnalyzer, export_frequency_table
 from src.analysis.statistical_tests import ResponseAnalyzer
 from src.analysis.filtering import CohortFilter
+from src.analysis.ml_analysis import ResponsePredictor
 from src.visualization.plots import TrialVisualizer
 import matplotlib.pyplot as plt
 from src.database.schema import DatabaseSchema, create_database
@@ -183,6 +185,96 @@ def run_cohort_analysis(config: dict) -> None:
     conn.close()
     print("\n✓ Cohort analysis complete!\n")
 
+def run_ml_analysis(config):
+    """Run machine learning analysis."""
+    print("\n" + "="*60)
+    print("MACHINE LEARNING ANALYSIS")
+    print("="*60 + "\n")
+    
+    db_path = config['database']['path']
+    params = config['analysis']['part3']
+    
+    # Connect to database
+    conn = sqlite3.connect(db_path)
+    
+    # Initialize predictor
+    predictor = ResponsePredictor(conn)
+    
+    # Prepare data
+    print("Preparing data...")
+    X, y = predictor.prepare_data(
+        indication=params['indication'],
+        treatment=params['treatment'],
+        sample_type=params['sample_type']
+    )
+    
+    print(f"✓ Features shape: {X.shape}")
+    print(f"✓ Responders: {y.sum()}, Non-responders: {len(y) - y.sum()}")
+    
+    # Train models
+    print("\nTraining models...")
+    results = predictor.train_models(X, y)
+    
+    # Print results
+    predictor.print_results(results)
+    
+    # Create visualizations
+    print("Creating visualizations...")
+    predictor.create_visualizations(results, save_dir="outputs")
+    
+    # Save detailed results to CSV
+    print("\nSaving results to CSV...")
+    
+    # Model comparison summary
+    comparison_df = pd.DataFrame({
+        'Model': ['Random Forest', 'XGBoost'],
+        'Test_Accuracy': [
+            results['random_forest']['test_accuracy'],
+            results['xgboost']['test_accuracy']
+        ],
+        'Test_Precision': [
+            results['random_forest']['test_precision'],
+            results['xgboost']['test_precision']
+        ],
+        'Test_Recall': [
+            results['random_forest']['test_recall'],
+            results['xgboost']['test_recall']
+        ],
+        'Test_F1': [
+            results['random_forest']['test_f1'],
+            results['xgboost']['test_f1']
+        ],
+        'Test_ROC_AUC': [
+            results['random_forest']['test_roc_auc'],
+            results['xgboost']['test_roc_auc']
+        ],
+        'CV_ROC_AUC_Mean': [
+            results['random_forest']['cv_roc_auc_mean'],
+            results['xgboost']['cv_roc_auc_mean']
+        ],
+        'CV_ROC_AUC_Std': [
+            results['random_forest']['cv_roc_auc_std'],
+            results['xgboost']['cv_roc_auc_std']
+        ]
+    })
+    
+    comparison_df.to_csv("outputs/ml_model_comparison.csv", index=False)
+    print("✓ Model comparison saved: outputs/ml_model_comparison.csv")
+    
+    # Feature importance
+    rf_importance = pd.DataFrame({
+        'Feature': list(results['random_forest']['feature_importance'].keys()),
+        'Random_Forest_Importance': list(results['random_forest']['feature_importance'].values()),
+        'XGBoost_Importance': list(results['xgboost']['feature_importance'].values())
+    })
+    
+    rf_importance = rf_importance.sort_values('Random_Forest_Importance', ascending=False)
+    rf_importance.to_csv("outputs/ml_feature_importance.csv", index=False)
+    print("✓ Feature importance saved: outputs/ml_feature_importance.csv")
+    
+    conn.close()
+    
+    print("\n✓ ML analysis complete!\n")
 
 def run_all_analyses(config: dict) -> None:
     """Run all analyses (Parts 2, 3, 4)."""
@@ -193,6 +285,7 @@ def run_all_analyses(config: dict) -> None:
     run_frequency_analysis(config)
     run_response_analysis(config)
     run_cohort_analysis(config)
+    run_ml_analysis(config)
     
     print("\n" + "="*60)
     print("ALL ANALYSES COMPLETE")
@@ -202,6 +295,9 @@ def run_all_analyses(config: dict) -> None:
     print("  - response_analysis_results.csv")
     print("  - response_boxplot.png")
     print("  - baseline_cohort.csv")
+    print("  - ml_model_comparison.csv")          # NEW
+    print("  - ml_feature_importance.csv")        # NEW
+    print("  - ml_analysis_results.png")          # NEW
     print("="*60 + "\n")
 
 
@@ -260,9 +356,15 @@ def main():
     )
     
     parser.add_argument(
+        '--ml-analysis',
+        action='store_true',
+        help='Run machine learning analysis'
+    )
+    
+    parser.add_argument(
         '--run-all',
         action='store_true',
-        help='Run all analyses (Parts 2, 3, 4)'
+        help='Run all analyses (Parts 2, 3, 4, ML)'
     )
     
     parser.add_argument(
@@ -302,6 +404,9 @@ def main():
     if args.cohort_analysis:
         run_cohort_analysis(config)
     
+    if args.ml_analysis:
+        run_ml_analysis(config)
+    
     if args.run_all:
         run_all_analyses(config)
     
@@ -311,7 +416,7 @@ def main():
     # If no arguments, show help
     if not any([args.init_db, args.load_data, args.info, 
                 args.frequency_analysis, args.response_analysis, 
-                args.cohort_analysis, args.run_all, args.dashboard]):
+                args.cohort_analysis, args.ml_analysis, args.run_all, args.dashboard]):
         parser.print_help()
 
 

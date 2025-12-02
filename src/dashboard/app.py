@@ -5,10 +5,12 @@ Usage:
     streamlit run src/dashboard/app.py
 """
 
+import os
 import streamlit as st
 import sqlite3
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import sys
 from pathlib import Path
 
@@ -47,7 +49,7 @@ def main():
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
         "Select Page:",
-        ["🏠 Overview", "📊 Frequency Analysis", "📈 Response Analysis", "👥 Cohort Explorer", "ℹ️ Database Info"]
+        ["🏠 Overview", "📊 Frequency Analysis", "📈 Response Analysis", "👥 Cohort Explorer", "🤖 ML Analysis","ℹ️ Database Info"]
     )
     
     # Get database connection
@@ -64,6 +66,196 @@ def main():
         show_cohort_explorer(conn)
     elif page == "ℹ️ Database Info":
         show_database_info(conn)
+    elif page == "🤖 ML Analysis":
+        st.header("🤖 Machine Learning Analysis")
+        
+        try:
+            # Check if files exist
+            comparison_path = "outputs/ml_model_comparison.csv"
+            importance_path = "outputs/ml_feature_importance.csv"
+            image_path = "outputs/ml_analysis_results.png"
+            
+            if not os.path.exists(comparison_path):
+                st.warning("⚠️ ML analysis results not found. Run the analysis first using the main pipeline.")
+            else:
+                # Load results
+                comparison_df = pd.read_csv(comparison_path)
+                
+                st.markdown("""
+                This analysis uses **Random Forest** and **XGBoost** classifiers to predict 
+                treatment response based on cell population frequencies.
+                """)
+                
+                # Model comparison - Side by side
+                st.subheader("📊 Model Performance Comparison")
+                
+                # Check what columns we have
+                available_cols = comparison_df.columns.tolist()
+                st.write(f"Available metrics: {', '.join([c for c in available_cols if c != 'Model'])}")
+                
+                col1, col2 = st.columns(2)
+                
+                # Get model data safely
+                rf_data = comparison_df[comparison_df['Model'] == 'Random Forest'].iloc[0]
+                xgb_data = comparison_df[comparison_df['Model'] == 'XGBoost'].iloc[0]
+                
+                with col1:
+                    st.markdown("### 🌲 Random Forest")
+                    
+                    # Display metrics that exist
+                    if 'Test_ROC_AUC' in available_cols:
+                        st.metric("ROC-AUC", f"{rf_data['Test_ROC_AUC']:.4f}")
+                    if 'Test_Accuracy' in available_cols:
+                        st.metric("Accuracy", f"{rf_data['Test_Accuracy']:.4f}")
+                    if 'Test_Precision' in available_cols:
+                        st.metric("Precision", f"{rf_data['Test_Precision']:.4f}")
+                    if 'Test_Recall' in available_cols:
+                        st.metric("Recall", f"{rf_data['Test_Recall']:.4f}")
+                    if 'Test_F1' in available_cols:
+                        st.metric("F1-Score", f"{rf_data['Test_F1']:.4f}")
+                    
+                    if 'CV_ROC_AUC_Mean' in available_cols:
+                        with st.expander("Cross-Validation Results"):
+                            st.write(f"**Mean ROC-AUC:** {rf_data['CV_ROC_AUC_Mean']:.4f}")
+                            if 'CV_ROC_AUC_Std' in available_cols:
+                                st.write(f"**Std Dev:** {rf_data['CV_ROC_AUC_Std']:.4f}")
+                
+                with col2:
+                    st.markdown("### ⚡ XGBoost")
+                    
+                    # Display metrics that exist
+                    if 'Test_ROC_AUC' in available_cols:
+                        st.metric("ROC-AUC", f"{xgb_data['Test_ROC_AUC']:.4f}")
+                    if 'Test_Accuracy' in available_cols:
+                        st.metric("Accuracy", f"{xgb_data['Test_Accuracy']:.4f}")
+                    if 'Test_Precision' in available_cols:
+                        st.metric("Precision", f"{xgb_data['Test_Precision']:.4f}")
+                    if 'Test_Recall' in available_cols:
+                        st.metric("Recall", f"{xgb_data['Test_Recall']:.4f}")
+                    if 'Test_F1' in available_cols:
+                        st.metric("F1-Score", f"{xgb_data['Test_F1']:.4f}")
+                    
+                    if 'CV_ROC_AUC_Mean' in available_cols:
+                        with st.expander("Cross-Validation Results"):
+                            st.write(f"**Mean ROC-AUC:** {xgb_data['CV_ROC_AUC_Mean']:.4f}")
+                            if 'CV_ROC_AUC_Std' in available_cols:
+                                st.write(f"**Std Dev:** {xgb_data['CV_ROC_AUC_Std']:.4f}")
+                
+                # Full comparison table
+                st.subheader("📊 Detailed Metrics Table")
+                st.dataframe(
+                    comparison_df.style.format({
+                        col: "{:.4f}" for col in comparison_df.columns if col != 'Model'
+                    }),
+                    use_container_width=True
+                )
+                
+                # Comparison chart
+                if len([c for c in available_cols if c.startswith('Test_')]) > 0:
+                    st.subheader("📈 Performance Metrics Comparison")
+                    
+                    metrics_to_compare = [c for c in available_cols if c.startswith('Test_')]
+                    
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Bar(
+                        name='Random Forest',
+                        x=[m.replace('Test_', '') for m in metrics_to_compare],
+                        y=[rf_data[m] for m in metrics_to_compare],
+                        marker_color='blue',
+                        text=[f"{rf_data[m]:.3f}" for m in metrics_to_compare],
+                        textposition='auto'
+                    ))
+                    
+                    fig.add_trace(go.Bar(
+                        name='XGBoost',
+                        x=[m.replace('Test_', '') for m in metrics_to_compare],
+                        y=[xgb_data[m] for m in metrics_to_compare],
+                        marker_color='red',
+                        text=[f"{xgb_data[m]:.3f}" for m in metrics_to_compare],
+                        textposition='auto'
+                    ))
+                    
+                    fig.update_layout(
+                        barmode='group',
+                        xaxis_title='Metric',
+                        yaxis_title='Score',
+                        yaxis_range=[0, 1],
+                        height=400,
+                        xaxis_tickangle=-45
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Feature importance
+                if os.path.exists(importance_path):
+                    st.subheader("🔍 Feature Importance Analysis")
+                    
+                    importance_df = pd.read_csv(importance_path)
+                    
+                    st.markdown("""
+                    Feature importance shows which cell populations are most useful for predicting treatment response.
+                    Higher values indicate greater predictive power.
+                    """)
+                    
+                    # Create horizontal bar chart
+                    fig2 = go.Figure()
+                    
+                    # Sort by Random Forest importance
+                    importance_df_sorted = importance_df.sort_values('Random_Forest_Importance', ascending=True)
+                    
+                    fig2.add_trace(go.Bar(
+                        name='Random Forest',
+                        y=importance_df_sorted['Feature'],
+                        x=importance_df_sorted['Random_Forest_Importance'],
+                        orientation='h',
+                        marker_color='blue',
+                        text=importance_df_sorted['Random_Forest_Importance'].round(4),
+                        textposition='auto'
+                    ))
+                    
+                    fig2.add_trace(go.Bar(
+                        name='XGBoost',
+                        y=importance_df_sorted['Feature'],
+                        x=importance_df_sorted['XGBoost_Importance'],
+                        orientation='h',
+                        marker_color='red',
+                        text=importance_df_sorted['XGBoost_Importance'].round(4),
+                        textposition='auto'
+                    ))
+                    
+                    fig2.update_layout(
+                        barmode='group',
+                        xaxis_title='Importance Score',
+                        yaxis_title='Cell Population',
+                        height=400
+                    )
+                    
+                    st.plotly_chart(fig2, use_container_width=True)
+                
+                # Show detailed visualization
+                st.subheader("📊 Detailed Analysis Visualizations")
+                
+                if os.path.exists(image_path):
+                    st.image(image_path, caption="ML Analysis Results: ROC Curves, Feature Importance, and Confusion Matrices", use_column_width=True)
+                else:
+                    st.warning("⚠️ Visualization image not found. Run the analysis to generate visualizations.")
+                
+                # Download options
+                st.subheader("💾 Download Results")
+                
+                csv_comparison = comparison_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Model Comparison",
+                    data=csv_comparison,
+                    file_name="ml_model_comparison.csv",
+                    mime="text/csv"
+                )
+                
+        except Exception as e:
+            st.error(f"❌ Error loading ML analysis results: {e}")
+            st.exception(e)
+            st.info("💡 Try running: `python main.py --run-all` to regenerate the ML analysis.")
 
 
 def show_overview(conn):
@@ -400,6 +592,7 @@ def show_database_info(conn):
     sample_type_data = pd.DataFrame(cursor.fetchall(), columns=['Sample Type', 'Count'])
     fig = px.pie(sample_type_data, values='Count', names='Sample Type', hole=0.3)
     st.plotly_chart(fig, use_container_width=True)
+
 
 
 if __name__ == "__main__":

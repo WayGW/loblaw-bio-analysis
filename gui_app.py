@@ -9,9 +9,20 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 import threading
 import subprocess
 import sys
+import os
 from pathlib import Path
 import yaml
 import sqlite3
+import pandas as pd
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 # Import project modules
 from src.database.schema import create_database
@@ -19,9 +30,21 @@ from src.database.loader import DataLoader
 from src.analysis.summary_stats import FrequencyAnalyzer, export_frequency_table
 from src.analysis.statistical_tests import ResponseAnalyzer
 from src.analysis.filtering import CohortFilter
+from src.analysis.ml_analysis import ResponsePredictor
 from src.visualization.plots import TrialVisualizer
 import matplotlib.pyplot as plt
 
+
+def is_frozen():
+    """Check if running as PyInstaller executable"""
+    return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+# Import simple viewer
+try:
+    from simple_viewer import SimpleResultsViewer
+    SIMPLE_VIEWER_AVAILABLE = True
+except ImportError:
+    SIMPLE_VIEWER_AVAILABLE = False
 
 class LoblawBioGUI:
     """Main GUI application class."""
@@ -33,10 +56,11 @@ class LoblawBioGUI:
         self.root.geometry("700x600")
         self.root.resizable(True, True)
         
-        # Variables
+           # Variables
         self.data_file_path = tk.StringVar()
         self.status_text = tk.StringVar(value="Ready to start")
         self.config = self.load_config()
+        self.dashboard_launched = False 
         
         # Create UI
         self.create_widgets()
@@ -47,12 +71,23 @@ class LoblawBioGUI:
     def load_config(self):
         """Load configuration from YAML."""
         try:
-            with open('config/config.yaml', 'r') as f:
+            config_path = resource_path('config/config.yaml')
+            with open(config_path, 'r') as f:
                 return yaml.safe_load(f)
         except Exception as e:
-            messagebox.showerror("Config Error", f"Could not load config: {e}")
-            return {}
-    
+            print(f"Config load error: {e}")
+            # Return default config if file not found
+            return {
+                'database': {'path': 'data/processed/loblaw_trial.db'},
+                'cell_populations': ['b_cell', 'cd8_t_cell', 'cd4_t_cell', 'nk_cell', 'monocyte'],
+                'analysis': {
+                    'part3': {
+                        'indication': 'melanoma',
+                        'treatment': 'miraclib',
+                        'sample_type': 'PBMC'
+                    }
+                }
+            }
     def create_widgets(self):
         """Create all GUI widgets."""
         
@@ -126,9 +161,16 @@ class LoblawBioGUI:
         results_frame.columnconfigure(0, weight=1)
         
         # View dashboard button
+        if is_frozen():
+            button_text = "📊 View Results Viewer"
+            button_tooltip ="Open interactive results viewer"
+        else:
+            button_text = "📊 View Interactive Dashboard"
+            button_tooltip = "Launch Streamlit dashboard in browser"
+
         self.dashboard_btn = ttk.Button(
             results_frame,
-            text="📊 View Interactive Dashboard",
+            text=button_text,
             command=self.open_dashboard,
             state="disabled"
         )
@@ -170,7 +212,7 @@ class LoblawBioGUI:
         help_btn.grid(row=0, column=0, sticky=tk.W)
         
         # Exit button
-        exit_btn = ttk.Button(bottom_frame, text="❌ Exit", command=self.root.quit)
+        exit_btn = ttk.Button(bottom_frame, text="❌ Exit", command=self.root.destroy)
         exit_btn.grid(row=0, column=1, sticky=tk.E)
     
     def browse_file(self):
@@ -314,10 +356,55 @@ class LoblawBioGUI:
                 treatment=params['treatment'],
                 sample_type=params['sample_type']
             )
-            
+
             baseline_df.to_csv("outputs/baseline_cohort.csv", index=False)
             self.log_message(f"   ✓ Saved {len(baseline_df)} baseline samples")
-            
+
+            # Step 6: Machine Learning Analysis  # NEW SECTION
+            self.status_text.set("Running ML analysis...")
+            self.log_message("\n6. Running machine learning analysis...")
+
+            try:
+                predictor = ResponsePredictor(conn)
+                
+                # Prepare data
+                X, y = predictor.prepare_data(
+                    indication=params['indication'],
+                    treatment=params['treatment'],
+                    sample_type=params['sample_type']
+                )
+                self.log_message(f"   ✓ Prepared {len(X)} samples for training")
+                
+                # Train models
+                self.log_message("   ✓ Training Random Forest and XGBoost...")
+                results = predictor.train_models(X, y)
+                
+                # Save results
+                comparison_df = pd.DataFrame({
+                    'Model': ['Random Forest', 'XGBoost'],
+                    'Test_Accuracy': [
+                        results['random_forest']['test_accuracy'],
+                        results['xgboost']['test_accuracy']
+                    ],
+                    'Test_ROC_AUC': [
+                        results['random_forest']['test_roc_auc'],
+                        results['xgboost']['test_roc_auc']
+                    ]
+                })
+                comparison_df.to_csv("outputs/ml_model_comparison.csv", index=False)
+                self.log_message("   ✓ Saved model comparison")
+                
+                # Create visualizations
+                predictor.create_visualizations(results, save_dir="outputs")
+                self.log_message("   ✓ Created ML visualizations")
+                
+                self.log_message(f"   ✓ Random Forest ROC-AUC: {results['random_forest']['test_roc_auc']:.3f}")
+                self.log_message(f"   ✓ XGBoost ROC-AUC: {results['xgboost']['test_roc_auc']:.3f}")
+                
+            except Exception as e:
+                self.log_message(f"   ⚠ ML analysis failed: {e}")
+                # Continue anyway - ML is optional
+
             conn.close()
             
             # Success!
@@ -329,6 +416,9 @@ class LoblawBioGUI:
             self.log_message("  - response_analysis_results.csv")
             self.log_message("  - response_boxplot.png")
             self.log_message("  - baseline_cohort.csv")
+            self.log_message("  - ml_model_comparison.csv")          
+            self.log_message("  - ml_feature_importance.csv")        
+            self.log_message("  - ml_analysis_results.png")          
             
             # Update UI on main thread
             self.root.after(0, self._analysis_complete_success)
@@ -362,32 +452,7 @@ class LoblawBioGUI:
         
         messagebox.showerror("Analysis Error", error_msg)
     
-    def open_dashboard(self):
-        """Launch the Streamlit dashboard."""
-        self.log_message("\nLaunching dashboard...")
-        self.status_text.set("Opening dashboard in browser...")
-        
-        try:
-            # Launch Streamlit in a separate process
-            subprocess.Popen(
-                [sys.executable, "-m", "streamlit", "run", "src/dashboard/app.py"],
-                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0
-            )
-            
-            self.log_message("✓ Dashboard opened at http://localhost:8501")
-            self.status_text.set("Dashboard running - check your browser")
-            
-            messagebox.showinfo(
-                "Dashboard Launched",
-                "The interactive dashboard is now running!\n\n"
-                "URL: http://localhost:8501\n\n"
-                "If it didn't open automatically, copy the URL above into your browser.\n\n"
-                "Close the dashboard terminal window when finished."
-            )
-        except Exception as e:
-            self.log_message(f"❌ Failed to launch dashboard: {e}")
-            messagebox.showerror("Dashboard Error", f"Could not launch dashboard: {e}")
-    
+
     def open_outputs_folder(self):
         """Open the outputs folder in file explorer."""
         outputs_path = Path("outputs").absolute()
@@ -408,6 +473,53 @@ class LoblawBioGUI:
         except Exception as e:
             messagebox.showerror("Error", f"Could not open folder: {e}")
     
+    def open_dashboard(self):
+        """Launch the dashboard (Streamlit or simple viewer)."""
+    
+        # Prevent multiple launches
+        if self.dashboard_launched:
+            messagebox.showinfo("Already Open", "Dashboard viewer is already open!")
+            return
+    
+        if is_frozen():
+            # Running from .exe - use simple viewer
+            self.log_message("\nOpening results viewer...")
+            self.status_text.set("Opening results viewer...")
+        
+            try:
+                viewer = SimpleResultsViewer(
+                    callback=lambda: setattr(self, 'dashboard_launched', False)
+                )
+                self.log_message("✓ Results viewer opened")
+                self.status_text.set("Results viewer opened")
+                self.dashboard_launched = True
+                viewer.run()  # Start the viewer's mainloop
+            
+            except Exception as e:
+                self.log_message(f"❌ Failed to open viewer: {e}")
+                import traceback
+                self.log_message(f"   Details: {traceback.format_exc()}")
+                messagebox.showerror("Viewer Error", f"Could not open results viewer:\n{e}")
+        else:
+            # Running from Python - use Streamlit
+            self.log_message("\nLaunching Streamlit dashboard...")
+            self.status_text.set("Launching dashboard...")
+            
+            try:
+                # Launch Streamlit in a separate process
+                dashboard_path = Path("src/dashboard/app.py")
+                if not dashboard_path.exists():
+                    raise FileNotFoundError("Dashboard script not found")
+                
+                subprocess.Popen(["streamlit", "run", str(dashboard_path)])
+                self.log_message("✓ Dashboard launched at http://localhost:8501")
+                self.status_text.set("Dashboard running")
+                self.dashboard_launched = True
+                
+            except Exception as e:
+                self.log_message(f"❌ Failed to launch dashboard: {e}")
+                messagebox.showerror("Dashboard Error", f"Could not launch dashboard:\n{e}")
+
     def show_help(self):
         """Show help dialog."""
         help_text = """
